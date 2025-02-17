@@ -42,6 +42,7 @@ defmodule Avalon.Provider.Azure do
   These options can be configured via the application environment or runtime configuration.
   """
 
+  alias Avalon.Conversation
   alias Avalon.Conversation.Message
   alias Avalon.Schema
 
@@ -88,10 +89,36 @@ defmodule Avalon.Provider.Azure do
   ]
 
   @impl true
-  def chat(messages, opts \\ []) do
-    with {:ok, opts} <- NimbleOptions.validate(opts, @chat_opts_schema) do
-      config = config()
+  @spec chat(Conversation.t() | [Message.t()], keyword()) ::
+          {:ok, Conversation.t() | [Message.t()]} | {:error, any()}
+  def chat(messages, opts \\ [])
 
+  def chat(%Conversation{system_prompt: system_prompt, messages: messages} = conversation, opts) do
+    system_prompt? = system_prompt != "" and not is_nil(system_prompt)
+
+    messages =
+      if system_prompt?,
+        do: [Message.new(role: :system, content: system_prompt) | messages],
+        else: messages
+
+    case chat(messages, opts) do
+      {:ok, messages} ->
+        messages =
+          if system_prompt?,
+            do: {:ok, tl(messages)},
+            else: {:ok, messages}
+
+        {:ok, %Conversation{conversation | messages: messages}}
+
+      {:error, error} ->
+        {:error, error}
+    end
+  end
+
+  def chat(messages, opts) do
+    config = config()
+
+    with {:ok, opts} <- NimbleOptions.validate(opts, @chat_opts_schema) do
       body =
         %{
           model: opts[:model],
@@ -114,13 +141,26 @@ defmodule Avalon.Provider.Azure do
              |> Map.get("message")
              |> Map.get("content")
              |> handle_content(opts) do
-        response =
-          Message.new(
-            role: :assistant,
-            content: content
-          )
+        response = Message.new(role: :assistant, content: content)
 
-        {:ok, response}
+        {:ok, messages ++ [response]}
+      else
+        {:error, error} ->
+          {:error, error}
+      end
+    end
+  end
+
+  defp handle_content(content, opts) do
+    if is_nil(opts[:output_schema]) do
+      content
+    else
+      with {:ok, decoded} <- JSON.decode(content),
+           {:ok, validated} <-
+             decoded
+             |> Keyword.new(fn {k, v} -> {String.to_atom(k), v} end)
+             |> NimbleOptions.validate(opts[:output_schema]) do
+        {:ok, Map.new(validated)}
       else
         {:error, error} ->
           {:error, error}
