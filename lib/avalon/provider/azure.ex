@@ -30,6 +30,8 @@ defmodule Avalon.Provider.Azure do
 
   use Avalon.Provider, otp_app: :avalon, config_opts_schema: @config_opts_schema
 
+  require Logger
+
   @moduledoc """
   Azure OpenAI Service provider implementation using Req.
 
@@ -85,11 +87,16 @@ defmodule Avalon.Provider.Azure do
       type: {:or, [:keyword_list, nil]},
       default: nil,
       doc: "A NimbleOptions schema representing the desired output schema"
+    ],
+    tools: [
+      type: {:list, :atom},
+      default: [],
+      doc: "A list of tools to use for chat completion"
     ]
   ]
 
   @impl true
-  @spec chat(Conversation.t() | [Message.t()], keyword()) ::
+  @spec chat(Conversation.t() | [Message.t() | map()], keyword()) ::
           {:ok, Conversation.t() | [Message.t()]} | {:error, any()}
   def chat(messages, opts \\ [])
 
@@ -118,32 +125,66 @@ defmodule Avalon.Provider.Azure do
   def chat(messages, opts) do
     config = config()
 
-    with {:ok, opts} <- NimbleOptions.validate(opts, @chat_opts_schema) do
-      body =
-        %{
-          model: opts[:model],
-          messages: messages,
-          temperature: opts[:temperature]
-        }
-        |> maybe_structured_outputs(opts)
-        |> Enum.reject(fn {_k, v} -> is_nil(v) end)
+    with {:ok, opts} <- NimbleOptions.validate(opts, @chat_opts_schema),
+         true <- valid_model(opts[:model]),
+         {:ok, %{status: 200, body: body}} <-
+           Req.post(req(),
+             url: "/chat/completions",
+             json: construct_body(messages, opts) |> dbg(),
+             params: [{"api-version", config[:api_version]}]
+           )
+           |> dbg(),
+         {:ok, messages} <- handle_body(body, messages, opts) do
+      {:ok, messages}
+    else
+      {:ok, response} ->
+        Logger.debug(response)
+        {:error, :invalid_response}
+
+      {:error, error} ->
+        {:error, error}
+
+      false ->
+        {:error,
+         "Invalid Model. Available models: #{Enum.map_join(list_models(), ", ", & &1[:name])}"}
+    end
+  end
+
+  defp valid_model(model) do
+    list_models() |> Enum.map(& &1[:name]) |> Enum.member?(model)
+  end
+
+  defp construct_body(messages, opts) do
+    %{
+      model: opts[:model],
+      messages: messages,
+      temperature: opts[:temperature]
+    }
+    |> maybe_add_tools(opts)
+    |> maybe_structured_outputs(opts)
+    |> Enum.reject(fn {_k, v} -> is_nil(v) end)
+    |> Map.new()
+  end
+
+  defp handle_body(
+         %{"choices" => [%{"finish_reason" => "stop", "message" => %{"content" => content}} | _]},
+         messages,
+         opts
+       ) do
+    if is_nil(opts[:output_schema]) do
+      message = Message.new(role: :assistant, content: content)
+      {:ok, messages ++ [message]}
+    else
+      with {:ok, decoded} <- JSON.decode(content),
+           {:ok, validated} <-
+             decoded
+             |> Keyword.new(fn {k, v} -> {String.to_atom(k), v} end)
+             |> NimbleOptions.validate(opts[:output_schema]) do
+        validated
         |> Map.new()
-
-      with {:ok, %{status: 200, body: body}} <-
-             Req.post(req(),
-               url: "/chat/completions",
-               json: body,
-               params: [{"api-version", config[:api_version]}]
-             ),
-           {:ok, content} <-
-             body["choices"]
-             |> List.first()
-             |> Map.get("message")
-             |> Map.get("content")
-             |> handle_content(opts) do
-        response = Message.new(role: :assistant, content: content)
-
-        {:ok, messages ++ [response]}
+        |> JSON.encode!()
+        |> then(&Message.new(role: :assistant, content: &1))
+        |> then(&{:ok, messages ++ [&1]})
       else
         {:error, error} ->
           {:error, error}
@@ -151,37 +192,47 @@ defmodule Avalon.Provider.Azure do
     end
   end
 
-  defp handle_content(content, opts) do
-    if is_nil(opts[:output_schema]) do
-      content
-    else
-      with {:ok, decoded} <- JSON.decode(content),
-           {:ok, validated} <-
-             decoded
-             |> Keyword.new(fn {k, v} -> {String.to_atom(k), v} end)
-             |> NimbleOptions.validate(opts[:output_schema]) do
-        {:ok, Map.new(validated)}
-      else
-        {:error, error} ->
-          {:error, error}
+  defp handle_body(
+         %{
+           "choices" => [
+             %{
+               "finish_reason" => "tool_calls",
+               "message" => %{"tool_calls" => tool_calls}
+             }
+             | _
+           ]
+         },
+         messages,
+         opts
+       ) do
+    tool_calls
+    |> Enum.reduce_while(
+      {:ok, messages ++ [Message.new(tool_calls: tool_calls, role: :assistant)]},
+      fn
+        tool_call, {:ok, acc} ->
+          case handle_tool_call(tool_call, opts[:tools]) do
+            {:ok, message} -> {:cont, {:ok, acc ++ [message]}}
+            {:error, error} -> {:halt, {:error, error}}
+          end
       end
+    )
+    |> case do
+      {:ok, messages} -> chat(messages, opts)
+      {:error, error} -> {:error, error}
     end
   end
 
-  defp handle_content(content, opts) do
-    if is_nil(opts[:output_schema]) do
-      content
+  defp handle_tool_call(
+         %{"id" => tool_call_id, "function" => %{"name" => name, "arguments" => arguments}},
+         tools
+       ) do
+    with {:ok, decoded} <- JSON.decode(arguments),
+         tool_module <- Enum.find(tools, &(&1.name() == name)),
+         {:ok, result} <- tool_module.run(decoded) do
+      {:ok, Message.new(role: :tool, content: result, tool_call_id: tool_call_id)}
     else
-      with {:ok, decoded} <- JSON.decode(content),
-           {:ok, validated} <-
-             decoded
-             |> Keyword.new(fn {k, v} -> {String.to_atom(k), v} end)
-             |> NimbleOptions.validate(opts[:output_schema]) do
-        {:ok, Map.new(validated)}
-      else
-        {:error, error} ->
-          {:error, error}
-      end
+      {:error, error} ->
+        {:error, error}
     end
   end
 
@@ -197,6 +248,12 @@ defmodule Avalon.Provider.Azure do
             schema: Schema.nimble_options_to_json_schema(opts[:output_schema])
           }
         })
+  end
+
+  defp maybe_add_tools(body, opts) do
+    if opts[:tools] == [],
+      do: body,
+      else: Map.put(body, :tools, Enum.map(opts[:tools], &format_tool!/1))
   end
 
   defp url(config),
@@ -221,4 +278,17 @@ defmodule Avalon.Provider.Azure do
 
   @impl true
   def image_generation(_, _), do: {:error, :not_supported}
+
+  @impl true
+  def format_tool!(tool_module) do
+    %{
+      type: "function",
+      function: %{
+        name: tool_module.name(),
+        description: tool_module.description(),
+        parameters: tool_module.parameters(),
+        strict: true
+      }
+    }
+  end
 end

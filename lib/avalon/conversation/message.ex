@@ -3,6 +3,10 @@ defmodule Avalon.Conversation.Message do
   Represents a message in a conversation with an LLM.
   """
 
+  @derive {JSON.Encoder,
+           only: [:id, :role, :content, :name, :tool_calls, :tool_call_id, :created_at, :metadata]}
+  @derive {Jason.Encoder,
+           only: [:id, :role, :content, :name, :tool_calls, :tool_call_id, :created_at, :metadata]}
   defstruct [
     # UUID for the message
     :id,
@@ -61,7 +65,7 @@ defmodule Avalon.Conversation.Message do
       doc: "Optional name for tool identification"
     ],
     tool_calls: [
-      type: {:list, :map},
+      type: {:list, {:map, :any, :any}},
       doc: "Optional list of tool calls"
     ],
     tool_call_id: [

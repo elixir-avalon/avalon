@@ -13,10 +13,10 @@ defmodule Avalon.Tool.Calculator do
   @tool_parameters [
     initial_value: [
       type: :float,
-      default: 0.0,
+      required: true,
       doc: """
-      The starting value for the calculation. If not provided, calculations will start from 0.
-      For example, with initial_value: 5, the calculation starts at 5.
+      The starting value for the calculation. Usually 0.0.
+      For example, with initial_value: 5.0, the calculation starts at 5.0.
       """
     ],
     operations: [
@@ -82,17 +82,18 @@ defmodule Avalon.Tool.Calculator do
     Operations are processed in sequence, with each operation using the previous result as its input.
     Supports basic arithmetic (+, -, *, /), powers (^), square root (sqrt), trigonometric functions
     (sin, cos, tan in radians), absolute value (abs), and rounding (round).
+    The calculator is implemented in Elixir and all numbers must be floats. This means that if you have an integer like 123, you must append .0 to it to make it a float like 123.0.
     """
   end
 
   @impl true
   def run(args) do
-    with {:ok, _validated} <-
+    with {:ok, validated} <-
            args
            |> convert_maps_to_keyword_lists()
            |> NimbleOptions.validate(@tool_parameters),
-         {:ok, result} <- calculate_operations(args) do
-      {:ok, result}
+         {:ok, result} <- validated |> Map.new() |> calculate_operations() do
+      {:ok, JSON.encode!(result)}
     end
   end
 
@@ -111,6 +112,8 @@ defmodule Avalon.Tool.Calculator do
   defp convert_maps_to_keyword_lists(data), do: data
 
   defp calculate_operations(%{initial_value: initial, operations: operations}) do
+    operations = Enum.map(operations, &Map.new/1)
+
     operations
     |> Enum.reduce_while({:ok, initial}, fn
       %{operation: "/", value: 0}, _acc ->

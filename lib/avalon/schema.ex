@@ -8,6 +8,7 @@ defmodule Avalon.Schema do
   @doc """
   Converts a NimbleOptions schema to JSON schema.
   """
+  @spec nimble_options_to_json_schema(NimbleOptions.t()) :: map()
   def nimble_options_to_json_schema(schema) do
     properties =
       Map.new(schema, fn {key, opts} -> {to_string(key), parameter_to_json_schema(opts)} end)
@@ -102,6 +103,10 @@ defmodule Avalon.Schema do
     }
   end
 
+  defp item_type_to_json_schema({:keyword_list, schema}) do
+    nimble_options_to_json_schema(schema)
+  end
+
   defp maybe_add_enum(schema, opts) do
     case Keyword.get(opts, :values) do
       nil -> schema
@@ -110,4 +115,3 @@ defmodule Avalon.Schema do
     end
   end
 end
-

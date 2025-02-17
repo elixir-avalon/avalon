@@ -31,5 +31,5 @@ defmodule Avalon.Tool do
   @callback name() :: String.t()
   @callback description() :: String.t()
   @callback parameters() :: map()
-  @callback run(args :: map()) :: {:ok, term()} | {:error, term()}
+  @callback run(args :: map()) :: {:ok, String.t()} | {:error, term()}
 end

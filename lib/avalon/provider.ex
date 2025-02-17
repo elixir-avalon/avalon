@@ -52,11 +52,14 @@ defmodule Avalon.Provider do
   @callback image_generation(prompt :: String.t(), opts :: keyword()) ::
               {:ok, String.t()} | {:error, reason :: any()}
 
+  @callback format_tool!(tool_module :: module()) :: map()
+
   @optional_callbacks [
     chat: 2,
     embeddings: 2,
     transcribe: 2,
-    image_generation: 2
+    image_generation: 2,
+    format_tool!: 1
   ]
 
   defmacro __using__(opts \\ []) do
