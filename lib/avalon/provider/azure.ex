@@ -101,19 +101,16 @@ defmodule Avalon.Provider.Azure do
   def chat(messages, opts \\ [])
 
   def chat(%Conversation{system_prompt: system_prompt, messages: messages} = conversation, opts) do
-    system_prompt? = system_prompt != "" and not is_nil(system_prompt)
+    system_prompt? = not is_nil(system_prompt)
 
-    messages =
-      if system_prompt?,
-        do: [Message.new(role: :system, content: system_prompt) | messages],
-        else: messages
+    messages = if system_prompt?, do: [system_prompt | messages], else: messages
 
     case chat(messages, opts) do
       {:ok, messages} ->
         messages =
           if system_prompt?,
-            do: {:ok, tl(messages)},
-            else: {:ok, messages}
+            do: tl(messages),
+            else: messages
 
         {:ok, %Conversation{conversation | messages: messages}}
 
