@@ -130,10 +130,9 @@ defmodule Avalon.Provider.Azure do
          {:ok, %{status: 200, body: body}} <-
            Req.post(req(),
              url: "/chat/completions",
-             json: construct_body(messages, opts) |> dbg(),
+             json: construct_body(messages, opts),
              params: [{"api-version", config[:api_version]}]
-           )
-           |> dbg(),
+           ),
          {:ok, messages} <- handle_body(body, messages, opts) do
       {:ok, messages}
     else
