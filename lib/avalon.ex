@@ -2,9 +2,6 @@ defmodule Avalon do
   @moduledoc """
   Documentation for `Avalon`.
   """
-  alias Avalon.Conversation
-  alias Avalon.Conversation.Message
-
   @chat_schema [
     provider: [
       type: :atom,
@@ -24,6 +21,8 @@ defmodule Avalon do
   ## Options
   #{NimbleOptions.docs(@chat_schema)}
   """
+  @spec chat(Conversation.t(), keyword) ::
+          {:ok, Conversation.t()} | {:error, NimbleOptions.error()}
   def chat(conversation, opts \\ []) do
     case NimbleOptions.validate(opts, @chat_schema) do
       {:ok, opts} -> opts[:provider].chat(conversation, opts[:provider_opts])
