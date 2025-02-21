@@ -106,7 +106,7 @@ defmodule Avalon.Conversation do
     end)
   end
 
-  defp do_add_message(conv, message), do: conv ++ [message]
+  defp do_add_message(conv, message), do: %__MODULE__{conv | messages: conv.messages ++ [message]}
 
   defp generate_id, do: UUID.uuid4()
 
