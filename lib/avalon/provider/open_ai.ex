@@ -159,4 +159,16 @@ defmodule Avalon.Provider.OpenAI do
           }
         })
   end
+
+  @impl true
+  def get_model(name) do
+    case Enum.find(list_models(), &(&1[:name] == name)) do
+      nil -> {:error, :not_found}
+      model -> {:ok, model}
+    end
+  end
+
+  @impl true
+  def list_models, do: config()[:models]
+
 end
