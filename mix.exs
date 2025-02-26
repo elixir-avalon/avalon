@@ -24,7 +24,7 @@ defmodule Avalon.MixProject do
       {:ex_doc, "~> 0.36", only: :dev, runtime: false},
       {:jason, "~> 1.0"},
       {:nimble_options, "~> 1.0"},
-      {:req, "~> 0.5", optional: true, only: :test},
+      {:req, "~> 0.5"},
       {:telemetry, "~> 1.0"}
     ]
   end
