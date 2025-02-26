@@ -21,3 +21,7 @@ avalon-*.tar
 
 # Temporary files, for example, from tests.
 /tmp/
+
+# Language server
+/.elixir_ls/
+/.elixir-tools/
