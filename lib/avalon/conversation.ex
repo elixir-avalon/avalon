@@ -51,12 +51,14 @@ defmodule Avalon.Conversation do
 
   ## Options
     * `:system_prompt` - Initial system prompt
+    * `:messages` - List of messages to initialize the conversation with
     * `:pre_hooks` - List of hooks to run before adding messages
     * `:post_hooks` - List of hooks to run after adding messages
   """
   def new(opts \\ []) do
     %__MODULE__{
       id: generate_id(),
+      messages: opts[:messages] || [],
       system_prompt: opts[:system_prompt] && ensure_system_message(opts[:system_prompt]),
       pre_hooks: opts[:pre_hooks] || [],
       post_hooks: opts[:post_hooks] || []
