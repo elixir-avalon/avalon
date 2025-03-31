@@ -41,7 +41,7 @@ defmodule Avalon.Conversation.Message do
   @type t :: %__MODULE__{
           id: String.t(),
           role: role(),
-          content: String.t() | nil,
+          content: String.t() | map() | [map()] | nil,
           name: String.t() | nil,
           tool_calls: [tool_call()] | nil,
           tool_call_id: String.t() | nil,
@@ -57,7 +57,7 @@ defmodule Avalon.Conversation.Message do
       type_spec: {:in, ~w[system user assistant tool]a}
     ],
     content: [
-      type: {:or, [:map, :string]},
+      type: {:or, [:map, :string, {:list, :map}]},
       doc: "The content of the message"
     ],
     name: [
