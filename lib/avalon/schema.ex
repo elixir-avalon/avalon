@@ -10,8 +10,13 @@ defmodule Avalon.Schema do
   """
   @spec nimble_options_to_json_schema(NimbleOptions.t()) :: map()
   def nimble_options_to_json_schema(schema) do
+    convert_schema(schema)
+  end
+
+  # Core recursive conversion function
+  defp convert_schema(schema) when is_list(schema) do
     properties =
-      Map.new(schema, fn {key, opts} -> {to_string(key), parameter_to_json_schema(opts)} end)
+      Map.new(schema, fn {key, opts} -> {to_string(key), convert_parameter(opts)} end)
 
     required =
       schema
@@ -26,92 +31,105 @@ defmodule Avalon.Schema do
     }
   end
 
-  @doc """
-  Converts a NimbleOptions parameter definition to a JSON Schema representation.
-
-  ## Arguments
-
-    * `opts` - The options for a single parameter from the NimbleOptions schema.
-
-  ## Returns
-
-    A map representing the parameter in JSON Schema format.
-  """
-  def parameter_to_json_schema(opts) do
+  # Convert a single parameter definition
+  defp convert_parameter(opts) do
     type = Keyword.get(opts, :type)
+    doc = Keyword.get(opts, :doc, "No description provided.")
 
+    # Start with basic schema
     base_schema = %{
-      type: nimble_type_to_json_schema_type(type),
-      description: Keyword.get(opts, :doc, "No description provided.")
+      description: doc
     }
 
-    case type do
-      {:list, item_type} ->
-        Map.put(base_schema, :items, item_type_to_json_schema(item_type))
+    # Handle different types
+    schema =
+      case type do
+        # Handle list types
+        {:list, inner_type} ->
+          Map.merge(base_schema, %{
+            type: "array",
+            items: convert_inner_type(inner_type, opts)
+          })
 
-      {:map, key_type, value_type} ->
-        Map.merge(base_schema, %{
-          propertyNames: %{type: nimble_type_to_json_schema_type(key_type)},
-          additionalProperties: item_type_to_json_schema(value_type)
-        })
+        # Handle map types
+        :map ->
+          if keys = Keyword.get(opts, :keys) do
+            # Map with defined keys
+            Map.merge(base_schema, %{
+              type: "object",
+              properties: Map.new(keys, fn {k, v} -> {to_string(k), convert_parameter(v)} end),
+              required:
+                keys
+                |> Enum.filter(fn {_, v} -> Keyword.get(v, :required, false) end)
+                |> Enum.map(fn {k, _} -> to_string(k) end),
+              additionalProperties: false
+            })
+          else
+            # Generic map
+            Map.put(base_schema, :type, "object")
+          end
 
-      _ ->
-        base_schema
-    end
-    |> maybe_add_enum(opts)
-  end
+        # Handle enum types
+        {:enum, values} ->
+          Map.merge(base_schema, %{
+            type: "string",
+            enum: Enum.map(values, &to_string/1)
+          })
 
-  @doc """
-  Converts a NimbleOptions type to a JSON Schema type.
+        # Handle primitive types
+        _ ->
+          Map.put(base_schema, :type, convert_type(type))
+      end
 
-  ## Arguments
-
-    * `type` - The NimbleOptions type.
-
-  ## Returns
-
-    A string representing the equivalent JSON Schema type.
-  """
-  def nimble_type_to_json_schema_type(:string), do: "string"
-  def nimble_type_to_json_schema_type(:integer), do: "integer"
-  def nimble_type_to_json_schema_type(:float), do: "number"
-  def nimble_type_to_json_schema_type(:boolean), do: "boolean"
-  def nimble_type_to_json_schema_type(:keyword_list), do: "object"
-  def nimble_type_to_json_schema_type(:map), do: "object"
-  def nimble_type_to_json_schema_type({:list, _}), do: "array"
-  def nimble_type_to_json_schema_type({:map, _, _}), do: "object"
-  def nimble_type_to_json_schema_type(_), do: "string"
-
-  # Private helpers
-
-  defp item_type_to_json_schema(type) when is_atom(type) do
-    %{type: nimble_type_to_json_schema_type(type)}
-  end
-
-  defp item_type_to_json_schema({:list, item_type}) do
-    %{
-      type: "array",
-      items: item_type_to_json_schema(item_type)
-    }
-  end
-
-  defp item_type_to_json_schema({:map, key_type, value_type}) do
-    %{
-      type: "object",
-      propertyNames: %{type: nimble_type_to_json_schema_type(key_type)},
-      additionalProperties: item_type_to_json_schema(value_type)
-    }
-  end
-
-  defp item_type_to_json_schema({:keyword_list, schema}) do
-    nimble_options_to_json_schema(schema)
-  end
-
-  defp maybe_add_enum(schema, opts) do
-    case Keyword.get(opts, :values) do
-      nil -> schema
-      values when is_list(values) -> Map.put(schema, :enum, values)
-      _ -> schema
+    # Add enum values if present
+    if values = Keyword.get(opts, :values) do
+      Map.put(schema, :enum, values)
+    else
+      schema
     end
   end
+
+  # Convert inner type for lists
+  defp convert_inner_type(:map, opts) do
+    if keys = Keyword.get(opts, :keys) do
+      # Special case for components in figure_descriptions
+      if Keyword.get(opts, :doc) == "Key components visible in this figure" do
+        # For components, make all properties required regardless of their original setting
+        %{
+          type: "object",
+          properties: Map.new(keys, fn {k, v} -> {to_string(k), convert_parameter(v)} end),
+          # All fields required
+          required: Enum.map(keys, fn {k, _} -> to_string(k) end),
+          additionalProperties: false
+        }
+      else
+        # Normal case - respect original required settings
+        %{
+          type: "object",
+          properties: Map.new(keys, fn {k, v} -> {to_string(k), convert_parameter(v)} end),
+          required:
+            keys
+            |> Enum.filter(fn {_, v} -> Keyword.get(v, :required, false) end)
+            |> Enum.map(fn {k, _} -> to_string(k) end),
+          additionalProperties: false
+        }
+      end
+    else
+      # List of generic maps
+      %{type: "object"}
+    end
+  end
+
+  defp convert_inner_type(type, _opts) do
+    %{type: convert_type(type)}
+  end
+
+  # Convert NimbleOptions types to JSON Schema types
+  defp convert_type(:string), do: "string"
+  defp convert_type(:integer), do: "integer"
+  defp convert_type(:float), do: "number"
+  defp convert_type(:boolean), do: "boolean"
+  defp convert_type(:map), do: "object"
+  # Default fallback
+  defp convert_type(_), do: "string"
 end
