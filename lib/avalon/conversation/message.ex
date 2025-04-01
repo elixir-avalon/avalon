@@ -5,8 +5,6 @@ defmodule Avalon.Conversation.Message do
 
   @derive {JSON.Encoder,
            only: [:id, :role, :content, :name, :tool_calls, :tool_call_id, :created_at, :metadata]}
-  @derive {Jason.Encoder,
-           only: [:id, :role, :content, :name, :tool_calls, :tool_call_id, :created_at, :metadata]}
   defstruct [
     # UUID for the message
     :id,
