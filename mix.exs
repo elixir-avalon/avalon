@@ -22,9 +22,7 @@ defmodule Avalon.MixProject do
     [
       {:elixir_uuid, "~> 1.2"},
       {:ex_doc, "~> 0.36", only: :dev, runtime: false},
-      {:jason, "~> 1.0"},
       {:nimble_options, "~> 1.0"},
-      {:req, "~> 0.5", optional: true, only: :test},
       {:telemetry, "~> 1.0"}
     ]
   end
