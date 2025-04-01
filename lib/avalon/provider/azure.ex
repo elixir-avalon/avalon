@@ -241,7 +241,7 @@ defmodule Avalon.Provider.Azure do
           json_schema: %{
             name: :schema,
             strict: true,
-            schema: Schema.nimble_options_to_json_schema(opts[:output_schema])
+            schema: Schema.to_json_schema(opts[:output_schema])
           }
         })
   end

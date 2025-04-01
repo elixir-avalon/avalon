@@ -1,135 +1,399 @@
 defmodule Avalon.Schema do
   @moduledoc """
-  Functions for working with schemas.
+  Provides utilities for converting between NimbleOptions schemas and JSON Schema,
+  as well as validating and transforming LLM responses against NimbleOptions schemas.
 
-  Schemas are represented as `NimbleOptions.t()`.
+  This module enables:
+  1. Converting NimbleOptions schemas to JSON Schema for LLM structured output validation
+  2. Converting NimbleOptions schemas to function specifications for LLM function calling
+  3. Transforming raw JSON responses from LLMs into structures that can be validated by NimbleOptions
   """
 
   @doc """
-  Converts a NimbleOptions schema to JSON schema.
-  """
-  @spec nimble_options_to_json_schema(NimbleOptions.t()) :: map()
-  def nimble_options_to_json_schema(schema) do
-    convert_schema(schema)
-  end
+  Converts a NimbleOptions schema to a JSON Schema.
 
-  # Core recursive conversion function
-  defp convert_schema(schema) when is_list(schema) do
+  This function takes a NimbleOptions schema definition and converts it to a JSON Schema
+  that can be used with LLM providers for structured output validation.
+
+  ## Examples
+
+      iex> schema = [
+      ...>   name: [type: :string, required: true],
+      ...>   age: [type: :integer, default: 30]
+      ...> ]
+      iex> Avalon.Schema.to_json_schema(schema)
+      %{
+        "type" => "object",
+        "required" => ["name"],
+        "properties" => %{
+          "name" => %{"type" => "string"},
+          "age" => %{"type" => "integer", "default" => 30}
+        }
+      }
+
+  """
+  @spec to_json_schema(NimbleOptions.schema()) :: map()
+  def to_json_schema(schema) when is_list(schema) do
     properties =
-      Map.new(schema, fn {key, opts} -> {to_string(key), convert_parameter(opts)} end)
+      schema
+      |> Enum.map(fn {key, opts} -> {to_string(key), schema_item_to_json_schema(opts)} end)
+      |> Enum.into(%{})
 
     required =
       schema
       |> Enum.filter(fn {_key, opts} -> Keyword.get(opts, :required, false) end)
       |> Enum.map(fn {key, _opts} -> to_string(key) end)
 
+    json_schema = %{
+      "type" => "object",
+      "properties" => properties
+    }
+
+    if Enum.empty?(required) do
+      json_schema
+    else
+      Map.put(json_schema, "required", required)
+    end
+  end
+
+  @doc """
+  Converts a NimbleOptions schema to a function specification for LLM function calling.
+
+  This is particularly useful when working with LLM APIs that support function calling,
+  such as OpenAI's GPT models or Anthropic's Claude.
+
+  ## Parameters
+
+  - `name` - The name of the function to be called by the LLM
+  - `description` - A description of what the function does
+  - `schema` - The NimbleOptions schema that defines the function parameters
+
+  ## Examples
+
+      iex> schema = [
+      ...>   name: [type: :string, required: true, doc: "The user's name"],
+      ...>   age: [type: :integer, default: 30, doc: "The user's age"]
+      ...> ]
+      iex> Avalon.Schema.to_function_spec("create_user", "Create a new user", schema)
+      %{
+        "name" => "create_user",
+        "description" => "Create a new user",
+        "parameters" => %{
+          "type" => "object",
+          "required" => ["name"],
+          "properties" => %{
+            "name" => %{
+              "type" => "string",
+              "description" => "The user's name"
+            },
+            "age" => %{
+              "type" => "integer",
+              "default" => 30,
+              "description" => "The user's age"
+            }
+          }
+        }
+      }
+
+  """
+  @spec to_function_spec(String.t(), String.t(), NimbleOptions.schema()) :: map()
+  def to_function_spec(name, description, schema)
+      when is_binary(name) and is_binary(description) and is_list(schema) do
+    json_schema = to_json_schema(schema)
+
+    properties_with_descriptions =
+      add_descriptions_to_properties(json_schema["properties"], schema)
+
     %{
-      type: "object",
-      properties: properties,
-      required: required,
-      additionalProperties: false
+      "name" => name,
+      "description" => description,
+      "parameters" => Map.put(json_schema, "properties", properties_with_descriptions)
     }
   end
 
-  # Convert a single parameter definition
-  defp convert_parameter(opts) do
+  @doc """
+  Transforms a raw JSON response from an LLM into a structure that can be validated by NimbleOptions.
+
+  This function handles the conversion between the string-based JSON format that LLMs produce
+  and the strongly-typed Elixir structures that NimbleOptions expects, including:
+
+  - Converting string keys to atoms
+  - Converting string values to atoms for atom-type fields
+  - Handling nested structures and lists
+  - Applying default values for missing fields
+  - Checking required fields
+
+  ## Parameters
+
+  - `json_response` - The raw JSON response from an LLM as a map with string keys
+  - `schema` - The NimbleOptions schema to transform the response against
+
+  ## Returns
+
+  - `{:ok, keyword_list}` - Successfully transformed the response into a keyword list
+  - `{:error, reason}` - Failed to transform the response with reason
+
+  ## Examples
+
+      iex> schema = [name: [type: :string, required: true], active: [type: :boolean, default: false]]
+      iex> response = %{"name" => "Alice", "active" => true}
+      iex> Avalon.Schema.transform_llm_response(response, schema)
+      {:ok, [name: "Alice", active: true]}
+
+      iex> schema = [status: [type: :atom]]
+      iex> response = %{"status" => "active"}
+      iex> Avalon.Schema.transform_llm_response(response, schema)
+      {:ok, [status: :active]}
+
+  """
+  @spec transform_llm_response(map(), NimbleOptions.schema()) ::
+          {:ok, keyword()} | {:error, String.t()}
+  def transform_llm_response(json_response, schema)
+      when is_map(json_response) and is_list(schema) do
+    try do
+      transformed = transform_map_to_keyword(json_response, schema)
+      {:ok, transformed}
+    rescue
+      e -> {:error, "Failed to transform LLM response: #{inspect(e)}"}
+    end
+  end
+
+  defp schema_item_to_json_schema(opts) when is_list(opts) do
     type = Keyword.get(opts, :type)
-    doc = Keyword.get(opts, :doc, "No description provided.")
 
-    # Start with basic schema
-    base_schema = %{
-      description: doc
-    }
+    base_schema = %{}
 
-    # Handle different types
     schema =
       case type do
-        # Handle list types
-        {:list, inner_type} ->
-          Map.merge(base_schema, %{
-            type: "array",
-            items: convert_inner_type(inner_type, opts)
-          })
+        :string ->
+          Map.put(base_schema, "type", "string")
 
-        # Handle map types
+        :atom ->
+          Map.put(base_schema, "type", "string")
+
+        :integer ->
+          Map.put(base_schema, "type", "integer")
+
+        :non_neg_integer ->
+          Map.merge(base_schema, %{"type" => "integer", "minimum" => 0})
+
+        :pos_integer ->
+          Map.merge(base_schema, %{"type" => "integer", "minimum" => 1})
+
+        :float ->
+          Map.put(base_schema, "type", "number")
+
+        :boolean ->
+          Map.put(base_schema, "type", "boolean")
+
+        :keyword_list ->
+          nested_schema = Keyword.get(opts, :keys, []) |> to_json_schema()
+          Map.merge(base_schema, nested_schema)
+
         :map ->
-          if keys = Keyword.get(opts, :keys) do
-            # Map with defined keys
-            Map.merge(base_schema, %{
-              type: "object",
-              properties: Map.new(keys, fn {k, v} -> {to_string(k), convert_parameter(v)} end),
-              required:
-                keys
-                |> Enum.filter(fn {_, v} -> Keyword.get(v, :required, false) end)
-                |> Enum.map(fn {k, _} -> to_string(k) end),
-              additionalProperties: false
-            })
-          else
-            # Generic map
-            Map.put(base_schema, :type, "object")
-          end
+          # Basic map type (shorthand for {:map, :atom, :any})
+          nested_schema = Keyword.get(opts, :keys, []) |> to_json_schema()
+          Map.merge(Map.put(base_schema, "type", "object"), nested_schema)
 
-        # Handle enum types
-        {:enum, values} ->
+        {:map, _key_type, _value_type} ->
+          # For complex map type - in JSON Schema we treat it as an object
+          nested_schema = Keyword.get(opts, :keys, []) |> to_json_schema()
+          Map.merge(Map.put(base_schema, "type", "object"), nested_schema)
+
+        {:list, subtype} ->
           Map.merge(base_schema, %{
-            type: "string",
-            enum: Enum.map(values, &to_string/1)
+            "type" => "array",
+            "items" => schema_item_to_json_schema(type: subtype)
           })
 
-        # Handle primitive types
+        {:in, values} when is_list(values) ->
+          Map.put(base_schema, "enum", values)
+
+        {:custom, _mod, _fun, _args} ->
+          # For custom types, we can only provide a generic schema
+          Map.put(base_schema, "type", "string")
+
         _ ->
-          Map.put(base_schema, :type, convert_type(type))
+          base_schema
       end
 
-    # Add enum values if present
-    if values = Keyword.get(opts, :values) do
-      Map.put(schema, :enum, values)
-    else
-      schema
+    # Add additional properties - important to check has_key? rather than truthy value for boolean defaults
+    schema =
+      if Keyword.has_key?(opts, :default),
+        do: Map.put(schema, "default", Keyword.get(opts, :default)),
+        else: schema
+
+    schema
+  end
+
+  defp transform_map_to_keyword(map, schema) when is_map(map) and is_list(schema) do
+    Enum.map(schema, fn {key, opts} ->
+      string_key = to_string(key)
+
+      value =
+        if Map.has_key?(map, string_key) do
+          raw_value = Map.get(map, string_key)
+          transform_value_based_on_type(raw_value, opts)
+        else
+          get_default_or_raise_if_required(key, opts)
+        end
+
+      {key, value}
+    end)
+  end
+
+  defp transform_value_based_on_type(raw_value, opts) do
+    type = Keyword.get(opts, :type)
+
+    case {type, raw_value} do
+      # Handle nested list with keyword list schema format
+      {{:list, {:keyword_list, nested_schema}}, items} when is_list(items) ->
+        transform_list_of_keyword_lists(items, nested_schema)
+
+      # All other types
+      _ ->
+        transform_value(raw_value, opts)
     end
   end
 
-  # Convert inner type for lists
-  defp convert_inner_type(:map, opts) do
-    if keys = Keyword.get(opts, :keys) do
-      # Special case for components in figure_descriptions
-      if Keyword.get(opts, :doc) == "Key components visible in this figure" do
-        # For components, make all properties required regardless of their original setting
-        %{
-          type: "object",
-          properties: Map.new(keys, fn {k, v} -> {to_string(k), convert_parameter(v)} end),
-          # All fields required
-          required: Enum.map(keys, fn {k, _} -> to_string(k) end),
-          additionalProperties: false
-        }
+  defp transform_list_of_keyword_lists(items, nested_schema) do
+    Enum.map(items, fn item when is_map(item) ->
+      transform_nested_map(item, nested_schema)
+    end)
+  end
+
+  defp transform_nested_map(item, schema) when is_map(item) and is_list(schema) do
+    Enum.map(schema, fn {nested_key, nested_opts} ->
+      nested_string_key = to_string(nested_key)
+      nested_value = Map.get(item, nested_string_key)
+
+      transformed_value =
+        if nested_value != nil do
+          transform_value(nested_value, nested_opts)
+        else
+          get_default_or_nil(nested_opts)
+        end
+
+      {nested_key, transformed_value}
+    end)
+  end
+
+  defp transform_value(value, opts) do
+    type = Keyword.get(opts, :type)
+
+    case {type, value} do
+      # For nested keyword lists in a list
+      {{:list, :keyword_list}, items} when is_list(items) ->
+        nested_schema = Keyword.get(opts, :keys, [])
+
+        Enum.map(items, fn item when is_map(item) ->
+          transform_map_to_keyword(item, nested_schema)
+        end)
+
+      # For regular keyword lists
+      {:keyword_list, map} when is_map(map) ->
+        nested_schema = Keyword.get(opts, :keys, [])
+        transform_map_to_keyword(map, nested_schema)
+
+      # For enums with atoms
+      {{:in, values}, val} when is_list(values) and is_binary(val) ->
+        transform_enum_value(val, values)
+
+      # For lists of simple types
+      {{:list, subtype}, items} when is_list(items) ->
+        Enum.map(items, fn item -> transform_value(item, type: subtype) end)
+
+      # For atoms
+      {:atom, string} when is_binary(string) ->
+        String.to_atom(string)
+
+      {:map, map} when is_map(map) ->
+        nested_schema = Keyword.get(opts, :keys, [])
+        transform_map_to_map(map, nested_schema)
+
+      {{:map, key_type, value_type}, map} when is_map(map) ->
+        transform_complex_map(map, key_type, value_type, opts)
+
+      # Default pass-through
+      _other ->
+        value
+    end
+  end
+
+  defp transform_enum_value(val, values) do
+    if Enum.all?(values, &is_atom/1) do
+      String.to_atom(val)
+    else
+      val
+    end
+  end
+
+  defp get_default_or_raise_if_required(key, opts) do
+    if Keyword.has_key?(opts, :default) do
+      Keyword.get(opts, :default)
+    else
+      if Keyword.get(opts, :required, false) do
+        raise "Required key #{key} not found in response"
       else
-        # Normal case - respect original required settings
-        %{
-          type: "object",
-          properties: Map.new(keys, fn {k, v} -> {to_string(k), convert_parameter(v)} end),
-          required:
-            keys
-            |> Enum.filter(fn {_, v} -> Keyword.get(v, :required, false) end)
-            |> Enum.map(fn {k, _} -> to_string(k) end),
-          additionalProperties: false
-        }
+        nil
       end
-    else
-      # List of generic maps
-      %{type: "object"}
     end
   end
 
-  defp convert_inner_type(type, _opts) do
-    %{type: convert_type(type)}
+  defp get_default_or_nil(opts) do
+    if Keyword.has_key?(opts, :default) do
+      Keyword.get(opts, :default)
+    else
+      nil
+    end
   end
 
-  # Convert NimbleOptions types to JSON Schema types
-  defp convert_type(:string), do: "string"
-  defp convert_type(:integer), do: "integer"
-  defp convert_type(:float), do: "number"
-  defp convert_type(:boolean), do: "boolean"
-  defp convert_type(:map), do: "object"
-  # Default fallback
-  defp convert_type(_), do: "string"
+  defp add_descriptions_to_properties(properties, schema) do
+    Enum.reduce(schema, properties, fn {key, opts}, acc ->
+      key_string = to_string(key)
+
+      if doc = Keyword.get(opts, :doc) do
+        Map.update!(acc, key_string, &Map.put(&1, "description", doc))
+      else
+        acc
+      end
+    end)
+  end
+
+  defp transform_map_to_map(map, schema) when is_map(map) and is_list(schema) do
+    # Similar to transform_map_to_keyword but keeps result as a map
+    Enum.reduce(schema, %{}, fn {key, opts}, acc ->
+      string_key = to_string(key)
+
+      value =
+        if Map.has_key?(map, string_key) do
+          raw_value = Map.get(map, string_key)
+          transform_value(raw_value, opts)
+        else
+          if Keyword.has_key?(opts, :default) do
+            Keyword.get(opts, :default)
+          else
+            if Keyword.get(opts, :required, false) do
+              raise "Required key #{key} not found in response"
+            else
+              nil
+            end
+          end
+        end
+
+      Map.put(acc, key, value)
+    end)
+  end
+
+  defp transform_complex_map(map, key_type, value_type, _opts) do
+    Enum.reduce(map, %{}, fn {k, v}, acc ->
+      transformed_key = transform_key(k, key_type)
+      transformed_value = transform_value(v, type: value_type)
+      Map.put(acc, transformed_key, transformed_value)
+    end)
+  end
+
+  defp transform_key(key, :atom) when is_binary(key), do: String.to_atom(key)
+  defp transform_key(key, :string) when is_atom(key), do: Atom.to_string(key)
+  defp transform_key(key, _), do: key
 end
