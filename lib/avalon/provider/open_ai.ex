@@ -129,6 +129,39 @@ defmodule Avalon.Provider.OpenAI do
     end
   end
 
+  @impl true
+  def get_model(name) do
+    case Enum.find(list_models(), &(&1[:name] == name)) do
+      nil -> {:error, :not_found}
+      model -> {:ok, model}
+    end
+  end
+
+  @impl true
+  def list_models, do: config()[:models]
+
+  @impl true
+  def embeddings(_, _), do: {:error, :not_supported}
+
+  @impl true
+  def transcribe(_, _), do: {:error, :not_supported}
+
+  @impl true
+  def image_generation(_, _), do: {:error, :not_supported}
+
+  @impl true
+  def format_tool!(tool_module) do
+    %{
+      type: "function",
+      function: %{
+        name: tool_module.name(),
+        description: tool_module.description(),
+        parameters: tool_module.parameters(),
+        strict: true
+      }
+    }
+  end
+
   defp handle_content(content, opts) do
     if is_nil(opts[:output_schema]) do
       content
@@ -155,7 +188,7 @@ defmodule Avalon.Provider.OpenAI do
           json_schema: %{
             name: :schema,
             strict: true,
-            schema: Schema.nimble_options_to_json_schema(opts[:output_schema])
+            schema: Schema.to_json_schema(opts[:output_schema])
           }
         })
   end
