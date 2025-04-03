@@ -1,33 +1,10 @@
-defmodule Avalon.Hook do
-  @callback pre_message(context :: map(), message :: Message.t(), opts :: keyword()) ::
-              {:ok, context :: map()} | {:error, term()}
+defprotocol Avalon.Hook do
+  @fallback_to_any true
+  def pre_process(hook, context, data)
+  def post_process(hook, context, data, result)
+end
 
-  @callback post_message(context :: map(), message :: Message.t(), opts :: keyword()) ::
-              {:ok, context :: map()} | {:error, term()}
-
-  @callback pre_node(context :: map(), node :: Node.t(), input :: term(), opts :: keyword()) ::
-              {:ok, context :: map()} | {:error, term()}
-
-  @callback post_node(context :: map(), node :: Node.t(), result :: term(), opts :: keyword()) ::
-              {:ok, context :: map()} | {:error, term()}
-
-  @callback pre_workflow(context :: map(), workflow :: Workflow.t(), opts :: keyword()) ::
-              {:ok, context :: map()} | {:error, term()}
-
-  @callback post_workflow(
-              context :: map(),
-              workflow :: Workflow.t(),
-              result :: term(),
-              opts :: keyword()
-            ) ::
-              {:ok, context :: map()} | {:error, term()}
-
-  @optional_callbacks [
-    pre_message: 3,
-    post_message: 3,
-    pre_node: 4,
-    post_node: 4,
-    pre_workflow: 3,
-    post_workflow: 4
-  ]
+defimpl Avalon.Hook, for: Any do
+  def pre_process(_hook, context, _data), do: {:ok, context}
+  def post_process(_hook, context, _data, _result), do: {:ok, context}
 end
