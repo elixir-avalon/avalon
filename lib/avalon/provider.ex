@@ -61,35 +61,4 @@ defmodule Avalon.Provider do
     image_generation: 2,
     format_tool!: 1
   ]
-
-  defmacro __using__(opts \\ []) do
-    otp_app = Keyword.get(opts, :otp_app)
-
-    unless otp_app do
-      raise ArgumentError,
-            "You must specify the OTP app name using the :otp_app option when using Avalon.Provider"
-    end
-
-    quote do
-      # ... existing code
-
-      # Load runtime configuration if available
-      defp runtime_config, do: Application.get_env(unquote(otp_app), __MODULE__, %{})
-
-      # Merge default options with runtime config
-      defp config do
-        # Validate and merge configuration
-        case NimbleOptions.validate(
-               runtime_config(),
-               unquote(Keyword.get(opts, :config_opts_schema, []))
-             ) do
-          {:ok, config} -> config
-          {:error, errors} -> raise ArgumentError, "Invalid configuration: #{inspect(errors)}"
-        end
-      end
-
-      # Implement the provider behaviour
-      @behaviour Avalon.Provider
-    end
-  end
 end
