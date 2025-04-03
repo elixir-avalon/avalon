@@ -22,6 +22,7 @@ defmodule Avalon.MixProject do
     [
       {:elixir_uuid, "~> 1.2"},
       {:ex_doc, "~> 0.36", only: :dev, runtime: false},
+      {:nimble_json_schema, github: "elixir-avalon/nimble_json_schema"},
       {:nimble_options, "~> 1.0"},
       {:telemetry, "~> 1.0"}
     ]

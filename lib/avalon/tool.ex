@@ -23,7 +23,7 @@ defmodule Avalon.Tool do
     quote do
       @impl true
       def parameters do
-        Avalon.Schema.to_json_schema(@tool_parameters)
+        NimbleJsonSchema.to_json_schema(@tool_parameters)
       end
     end
   end
