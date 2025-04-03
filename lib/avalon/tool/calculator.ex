@@ -90,26 +90,12 @@ defmodule Avalon.Tool.Calculator do
   def run(args) do
     with {:ok, validated} <-
            args
-           |> convert_maps_to_keyword_lists()
+           |> NimbleJsonSchema.transform_json(@tool_parameters)
            |> NimbleOptions.validate(@tool_parameters),
          {:ok, result} <- validated |> Map.new() |> calculate_operations() do
       {:ok, JSON.encode!(result)}
     end
   end
-
-  defp convert_maps_to_keyword_lists(data) when is_map(data) do
-    data
-    |> Enum.map(fn {k, v} ->
-      {String.to_existing_atom("#{k}"), convert_maps_to_keyword_lists(v)}
-    end)
-    |> Keyword.new()
-  end
-
-  defp convert_maps_to_keyword_lists(data) when is_list(data) do
-    Enum.map(data, &convert_maps_to_keyword_lists/1)
-  end
-
-  defp convert_maps_to_keyword_lists(data), do: data
 
   defp calculate_operations(%{initial_value: initial, operations: operations}) do
     operations = Enum.map(operations, &Map.new/1)

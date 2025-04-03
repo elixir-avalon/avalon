@@ -22,14 +22,12 @@ defmodule Avalon.Tool do
   defmacro __before_compile__(_env) do
     quote do
       @impl true
-      def parameters do
-        NimbleJsonSchema.to_json_schema(@tool_parameters)
-      end
+      def parameters, do: @tool_parameters
     end
   end
 
   @callback name() :: String.t()
   @callback description() :: String.t()
-  @callback parameters() :: map()
+  @callback parameters() :: Keyword.t()
   @callback run(args :: map()) :: {:ok, String.t()} | {:error, term()}
 end
