@@ -19,16 +19,6 @@ defmodule Avalon.Provider do
   @callback get_model(name :: String.t()) :: {:ok, Model.t()} | {:error, :not_found}
 
   @doc """
-  Maps provider-specific roles to Avalon standard roles.
-  """
-  @callback normalise_role(provider_role :: String.t()) :: Message.role()
-
-  @doc """
-  Maps Avalon standard roles to provider-specific roles.
-  """
-  @callback prepare_role(role :: Message.role()) :: String.t()
-
-  @doc """
   Generates a chat response from a list of messages.
   """
   @callback chat(messages :: [Message.t()], opts :: keyword()) ::
@@ -52,13 +42,16 @@ defmodule Avalon.Provider do
   @callback image_generation(prompt :: String.t(), opts :: keyword()) ::
               {:ok, String.t()} | {:error, reason :: any()}
 
-  @callback format_tool!(tool_module :: module()) :: map()
+  @doc """
+  Prepares a tool module for use by the provider.
+  """
+  @callback format_tool(tool_module :: module()) :: map()
 
   @optional_callbacks [
     chat: 2,
     embeddings: 2,
     transcribe: 2,
     image_generation: 2,
-    format_tool!: 1
+    format_tool: 1
   ]
 end
