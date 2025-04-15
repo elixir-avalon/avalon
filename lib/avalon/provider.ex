@@ -19,16 +19,6 @@ defmodule Avalon.Provider do
   @callback get_model(name :: String.t()) :: {:ok, Model.t()} | {:error, :not_found}
 
   @doc """
-  Maps provider-specific roles to Avalon standard roles.
-  """
-  @callback normalise_role(provider_role :: String.t()) :: Message.role()
-
-  @doc """
-  Maps Avalon standard roles to provider-specific roles.
-  """
-  @callback prepare_role(role :: Message.role()) :: String.t()
-
-  @doc """
   Generates a chat response from a list of messages.
   """
   @callback chat(messages :: [Message.t()], opts :: keyword()) ::
@@ -52,44 +42,16 @@ defmodule Avalon.Provider do
   @callback image_generation(prompt :: String.t(), opts :: keyword()) ::
               {:ok, String.t()} | {:error, reason :: any()}
 
-  @callback format_tool!(tool_module :: module()) :: map()
+  @doc """
+  Prepares a tool module for use by the provider.
+  """
+  @callback format_tool(tool_module :: module()) :: map()
 
   @optional_callbacks [
     chat: 2,
     embeddings: 2,
     transcribe: 2,
     image_generation: 2,
-    format_tool!: 1
+    format_tool: 1
   ]
-
-  defmacro __using__(opts \\ []) do
-    otp_app = Keyword.get(opts, :otp_app)
-
-    unless otp_app do
-      raise ArgumentError,
-            "You must specify the OTP app name using the :otp_app option when using Avalon.Provider"
-    end
-
-    quote do
-      # ... existing code
-
-      # Load runtime configuration if available
-      defp runtime_config, do: Application.get_env(unquote(otp_app), __MODULE__, %{})
-
-      # Merge default options with runtime config
-      defp config do
-        # Validate and merge configuration
-        case NimbleOptions.validate(
-               runtime_config(),
-               unquote(Keyword.get(opts, :config_opts_schema, []))
-             ) do
-          {:ok, config} -> config
-          {:error, errors} -> raise ArgumentError, "Invalid configuration: #{inspect(errors)}"
-        end
-      end
-
-      # Implement the provider behaviour
-      @behaviour Avalon.Provider
-    end
-  end
 end
