@@ -5,53 +5,55 @@ defmodule Avalon.Provider do
   like OpenAI, Anthropic, Together, etc.
   """
 
+  alias Avalon.Error
   alias Avalon.Message
   alias Avalon.Provider.Model
 
-  @doc """
-  Lists all available models for this provider.
-  """
   @callback list_models() :: [Model.t()]
 
-  @doc """
-  Retrieves a specific model by name.
-  """
   @callback get_model(name :: String.t()) :: {:ok, Model.t()} | {:error, :not_found}
 
-  @doc """
-  Generates a chat response from a list of messages.
-  """
+  @callback response_to_message(response :: map()) :: {:ok, Message.t()} | {:error, Error.t()}
+
+  @callback validate_options(opts :: keyword()) :: {:ok, keyword} | {:error, Error.t()}
+
+  @callback prepare_chat_body(messages :: [Message.t()], opts :: keyword()) ::
+              {:ok, map()} | {:error, Error.t()}
+
   @callback chat(messages :: [Message.t()], opts :: keyword()) ::
-              {:ok, Message.t()} | {:error, reason :: any()}
+              {:ok, Message.t()} | {:error, Error.t()}
 
-  @doc """
-  Generates embeddings for the given input.
-  """
-  @callback embeddings(input :: String.t(), opts :: keyword()) ::
-              {:ok, list(float())} | {:error, reason :: any()}
+  @callback ensure_structure(Message.t(), opts :: keyword()) ::
+              {:ok, Message.t()} | {:error, Error.t()}
 
-  @doc """
-  Transcribes audio to text.
-  """
-  @callback transcribe(audio_file :: String.t(), opts :: keyword()) ::
-              {:ok, String.t()} | {:error, reason :: any()}
+  @callback request_chat(
+              body :: map(),
+              opts :: keyword()
+            ) :: {:ok, map()} | {:error, Error.t()}
 
-  @doc """
-  Generates an image from a text prompt.
-  """
-  @callback image_generation(prompt :: String.t(), opts :: keyword()) ::
-              {:ok, String.t()} | {:error, reason :: any()}
-
-  @doc """
-  Prepares a tool module for use by the provider.
-  """
   @callback format_tool(tool_module :: module()) :: map()
 
   @optional_callbacks [
     chat: 2,
-    embeddings: 2,
-    transcribe: 2,
-    image_generation: 2,
     format_tool: 1
   ]
+
+  defmacro __using__(_opts) do
+    quote do
+      @behaviour Avalon.Provider
+
+      @impl true
+      def chat(messages, opts) do
+        with {:ok, opts} <- validate_options(opts),
+             {:ok, body} <- prepare_chat_body(messages, opts),
+             {:ok, response} <- request_chat(body, opts),
+             {:ok, message} <- response_to_message(response),
+             {:ok, message} <- ensure_structure(message, opts) do
+          {:ok, message}
+        else
+          {:error, error} -> {:error, error}
+        end
+      end
+    end
+  end
 end
