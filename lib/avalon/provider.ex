@@ -203,8 +203,75 @@ defmodule Avalon.Provider do
   """
   @callback format_tool(tool_module :: module()) :: map()
 
+  @doc """
+  Generates vector embeddings for text inputs using the provider's embedding model.
+
+  ## Parameters
+  - `text`: Either a single string or a list of strings to be embedded
+  - `opts`: Keyword list of provider-specific options
+
+  ## Returns
+  - `{:ok, embeddings}` where embeddings is either:
+    - A single vector (list of floats) for a single text input
+    - A list of vectors for multiple text inputs
+  - `{:error, Error.t()}` on failure
+
+  ## Options
+  Provider implementations may support options such as:
+  - `:model` - Specific embedding model to use
+  - `:dimensions` - Desired vector dimensionality
+  - `:normalize` - Whether to normalize vectors
+
+  ## Example
+  ```elixir
+  {:ok, embedding} = Provider.embed("Sample text", model: "text-embedding-3-large")
+  {:ok, embeddings} = Provider.embed(["Text one", "Text two"], dimensions: 1536)
+  """
+  @callback embed(text :: String.t() | [String.t()], opts :: keyword()) ::
+              {:ok, embeddings :: [float()] | [[float()]]} | {:error, Error.t()}
+
+  @doc """
+  Transcribes audio content into text using the provider's speech-to-text capabilities.
+
+  ## Parameters
+  - `audio`: Audio data in one of the following formats:
+    - Binary content of an audio file
+  - `opts`: Keyword list of provider-specific options
+
+  ## Returns
+  - `{:ok, transcript}` where transcript is a map containing:
+    - `:text` - The full transcribed text
+    - `:segments` - (Optional) List of timed segments with speaker identification
+    - `:metadata` - (Optional) Additional provider-specific information
+  - `{:error, Error.t()}` on failure
+
+  ## Options
+  Provider implementations may support options such as:
+  - `:model` - Specific transcription model to use
+  - `:language` - Target language code (e.g., "en", "fr")
+  - `:prompt` - Context hint to improve transcription accuracy
+  - `:format` - Audio format specification if not auto-detected
+  - `:timestamps` - Whether to include word or segment timestamps
+  - `:speakers` - Number of speakers to identify (for diarization)
+
+  ## Example
+  ```elixir
+  {:ok, transcript} = Provider.transcribe("recording.mp3", language: "en", speakers: 2)
+  IO.puts(transcript.text)
+  ```
+
+  ## Notes
+  - Supported audio formats vary by provider but typically include MP3, WAV, FLAC, etc.
+  - Maximum audio duration and file size limits are provider-specific
+  - For long audio files, some providers may require streaming implementations
+  """
+  @callback transcribe(audio :: binary() | String.t(), opts :: keyword()) ::
+              {:ok, map()} | {:error, Error.t()}
+
   @optional_callbacks [
-    format_tool: 1
+    format_tool: 1,
+    embed: 2,
+    transcribe: 2
   ]
 
   defmacro __using__(_opts) do
