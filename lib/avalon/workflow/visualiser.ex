@@ -9,8 +9,10 @@ defmodule Avalon.Workflow.Visualizer do
 
   defp generate_nodes(nodes) do
     nodes
-    |> Enum.map(fn {id, module} ->
-      "    #{id}[\"#{module}\"]"
+    # Extract module from tuple
+    |> Enum.map(fn {id, {module, _opts}} ->
+      # Use inspect for safe string conversion
+      "    #{id}[\"#{inspect(module)}\"]"
     end)
     |> Enum.join("\n")
   end
