@@ -55,8 +55,7 @@ defmodule Avalon.Workflow do
          :ok <- validate_unique_node(workflow, id),
          :ok <- validate_routes(workflow, routes) do
       nodes = Map.put(workflow.nodes, id, {module, []})
-      %{workflow | nodes: nodes, routes: routes}
-      %{workflow | nodes: nodes}
+      %{workflow | nodes: nodes, routes: Map.put(workflow.routes, id, routes)}
     end
   end
 
@@ -169,9 +168,11 @@ defmodule Avalon.Workflow do
   end
 
   defp implements?(module, behaviour) do
-    module.module_info(:attributes)
-    |> Keyword.get(:behaviour, [])
-    |> Enum.member?(behaviour)
+    behaviours =
+      module.module_info(:attributes)
+      |> Keyword.get(:behaviour, [])
+
+    Enum.member?(behaviours, behaviour)
   end
 
   def execute(%Workflow{} = workflow) do
@@ -192,19 +193,31 @@ defmodule Avalon.Workflow do
   end
 
   defp continue_execution(workflow, node_id) do
-    case get_next_nodes(workflow, node_id) do
-      # Implicit termination - no more nodes
-      [] ->
-        {:ok, workflow}
+    {module, _opts} = workflow.nodes[node_id]
 
-      next_nodes ->
-        Enum.reduce_while(next_nodes, {:ok, workflow}, fn next_id, {:ok, workflow} ->
-          case execute_from_node(workflow, next_id) do
-            {:ok, workflow} -> {:cont, {:ok, workflow}}
-            {:halt, workflow} -> {:halt, {:ok, workflow}}
-            {:error, reason} -> {:halt, {:error, reason}}
-          end
-        end)
+    if implements?(module, Avalon.Workflow.Router) do
+      # For routers, use their routing decision
+      case workflow.context[:router_decision] do
+        nil -> {:error, "Router did not provide a routing decision"}
+        :halt -> {:halt, workflow}
+        next_node -> execute_from_node(workflow, next_node)
+      end
+    else
+      # For regular nodes, continue with edge-based navigation
+      case get_next_nodes(workflow, node_id) do
+        [] ->
+          {:ok, workflow}
+
+        next_nodes ->
+          # Execute each next node in sequence
+          Enum.reduce_while(next_nodes, {:ok, workflow}, fn next_id, {:ok, acc} ->
+            case execute_from_node(acc, next_id) do
+              {:ok, new_acc} -> {:cont, {:ok, new_acc}}
+              {:halt, new_acc} -> {:halt, {:halt, new_acc}}
+              {:error, reason} -> {:halt, {:error, reason}}
+            end
+          end)
+      end
     end
   end
 
@@ -232,27 +245,24 @@ defmodule Avalon.Workflow do
   defp execute_node(workflow, node_id) do
     {module, _opts} = workflow.nodes[node_id]
 
-    case module.run(workflow, node_id) do
-      {:ok, workflow} ->
-        if Map.has_key?(workflow.routes, node_id) do
-          handle_router_result(workflow, node_id)
-        else
-          {:ok, workflow}
-        end
+    # Check if this is a router or a regular node
+    if implements?(module, Avalon.Workflow.Router) do
+      # Execute as router
+      case module.route(workflow) do
+        {:cont, next_node} ->
+          # Store routing decision for later use
+          updated_workflow = put_in(workflow.context[:router_decision], next_node)
+          {:ok, updated_workflow}
 
-      other ->
-        other
-    end
-  end
+        {:halt, result} ->
+          {:halt, put_in(workflow.context[:halt_reason], result)}
 
-  defp handle_router_result(workflow, router_id) do
-    routes = workflow.routes[router_id]
-    result = workflow.context.current_result
-
-    case Map.get(routes, result) do
-      :halt -> {:halt, workflow}
-      next_node when is_atom(next_node) -> {:ok, workflow}
-      nil -> {:error, "Invalid routing result: #{inspect(result)}"}
+        {:error, reason} ->
+          {:error, reason}
+      end
+    else
+      # Execute as regular node
+      module.run(workflow, node_id)
     end
   end
 
