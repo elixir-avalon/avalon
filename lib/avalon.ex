@@ -31,4 +31,24 @@ defmodule Avalon do
       {:error, error} -> {:error, error}
     end
   end
+
+  @doc """
+  Stream an array of `Message.t()` to an LLM, invoking `on_chunk` for each
+  `Avalon.StreamChunk` as it arrives and returning the fully-assembled
+  `Message.t()` once the stream completes.
+
+  The provider must implement the optional `c:Avalon.Provider.stream_chat/3`
+  callback.
+
+  ## Options
+  #{NimbleOptions.docs(@chat_schema)}
+  """
+  @spec stream([Message.t()], (Avalon.StreamChunk.t() -> any()), keyword()) ::
+          {:ok, Message.t()} | {:error, NimbleOptions.error()}
+  def stream(messages, on_chunk, opts \\ []) when is_function(on_chunk, 1) do
+    case NimbleOptions.validate(opts, @chat_schema) do
+      {:ok, opts} -> opts[:provider].stream_chat(messages, opts[:provider_opts], on_chunk)
+      {:error, error} -> {:error, error}
+    end
+  end
 end
