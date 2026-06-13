@@ -88,6 +88,7 @@ defmodule Avalon.Provider do
   alias Avalon.Error
   alias Avalon.Conversation.Message
   alias Avalon.Provider.Model
+  alias Avalon.StreamChunk
 
   @doc """
   Returns all available models from this provider.
@@ -268,10 +269,33 @@ defmodule Avalon.Provider do
   @callback transcribe(audio :: binary() | String.t(), opts :: keyword()) ::
               {:ok, map()} | {:error, Error.t()}
 
+  @doc """
+  Streams a chat completion, invoking `on_chunk` for each incremental update.
+
+  ## Parameters
+  - `messages`: List of `Message.t()` structs representing the conversation history
+  - `opts`: Provider options, as for `chat/2`
+  - `on_chunk`: A function invoked with each `Avalon.StreamChunk` as it arrives
+
+  ## Expected Behavior
+  - Invokes `on_chunk` with `%StreamChunk{content: delta}` for each text fragment
+  - Invokes `on_chunk` with `%StreamChunk{done: true}` once the stream ends
+  - Accumulates the streamed deltas and returns the fully assembled `Message.t()`
+
+  ## Error Handling
+  - Returns `{:error, Error.t()}` on transport or protocol failure
+  """
+  @callback stream_chat(
+              messages :: [Message.t()],
+              opts :: keyword(),
+              on_chunk :: (StreamChunk.t() -> any())
+            ) :: {:ok, Message.t()} | {:error, Error.t()}
+
   @optional_callbacks [
     format_tool: 1,
     embed: 2,
-    transcribe: 2
+    transcribe: 2,
+    stream_chat: 3
   ]
 
   defmacro __using__(_opts) do
